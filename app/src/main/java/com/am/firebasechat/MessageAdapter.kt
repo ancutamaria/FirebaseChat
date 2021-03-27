@@ -22,7 +22,7 @@ class MessageAdapter(context: Context?, resource: Int, objects: List<FriendlyMes
         val messageTextView = convertView.findViewById(R.id.messageTextView) as TextView
         val authorTextView = convertView.findViewById(R.id.nameTextView) as TextView
         val message = getItem(position) as FriendlyMessage
-        val isPhoto = true
+        val isPhoto = false
         if (isPhoto) {
             messageTextView.visibility = View.GONE
             photoImageView.visibility = View.VISIBLE
