@@ -56,4 +56,6 @@ dependencies {
 
     // Declare the dependencies for any other desired Firebase products
     implementation 'com.google.firebase:firebase-database-ktx:19.7.0'
+    implementation 'com.google.firebase:firebase-auth-ktx:20.0.3'
+    implementation 'com.firebaseui:firebase-ui-auth:7.1.1'
 }

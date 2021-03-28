@@ -1,18 +1,23 @@
 package com.am.firebasechat
 
+import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputFilter.LengthFilter
 import android.text.TextWatcher
-import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import com.firebase.ui.auth.AuthUI
+import com.firebase.ui.auth.AuthUI.IdpConfig
+import com.firebase.ui.auth.AuthUI.IdpConfig.EmailBuilder
+import com.firebase.ui.auth.AuthUI.IdpConfig.GoogleBuilder
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuth.AuthStateListener
 import com.google.firebase.database.*
-import com.google.firebase.database.ktx.getValue
 
 
 class MainActivity : AppCompatActivity() {
@@ -20,6 +25,8 @@ class MainActivity : AppCompatActivity() {
 
     private val ANONYMOUS = "anonymous"
     private val DEFAULT_MSG_LENGTH_LIMIT = 1000
+    private val RC_SIGN_IN = 1
+
 
     private var mMessageListView: ListView? = null
     private var mMessageAdapter: MessageAdapter? = null
@@ -36,7 +43,10 @@ class MainActivity : AppCompatActivity() {
     // messages portion of the database
     private lateinit var mMessagesDatabaseReference: DatabaseReference
     //for reading messages from firebase db
-    private lateinit var mChildEventListener: ChildEventListener
+    // TODO fix nullable attribute
+    private var mChildEventListener: ChildEventListener? = null
+    private lateinit var mFirebaseAuth: FirebaseAuth
+    private var mAuthStateListener: AuthStateListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +55,8 @@ class MainActivity : AppCompatActivity() {
 
         mFirebaseDatabase = FirebaseDatabase.getInstance()
         mMessagesDatabaseReference = mFirebaseDatabase.reference.child("messages")
+        mFirebaseAuth = FirebaseAuth.getInstance();
+
 
         // Initialize references to views
         mProgressBar = findViewById<View>(R.id.progressBar) as ProgressBar
@@ -87,19 +99,59 @@ class MainActivity : AppCompatActivity() {
             mMessagesDatabaseReference.push().setValue(friendlyMessage);
         }
 
-        mChildEventListener = object : ChildEventListener {
-            override fun onChildAdded(dataSnapshot: DataSnapshot, s: String?) {
-                val friendlyMessage: FriendlyMessage = dataSnapshot.getValue<FriendlyMessage>()!!
-                mMessageAdapter!!.add(friendlyMessage)
+        mAuthStateListener = AuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                //user is signedin
+                onSignedInInitialize(user.getDisplayName());
+            } else {
+                //user is signed out
+                // Choose authentication providers
+                val providers: List<IdpConfig> = listOf(
+                    EmailBuilder().build(),
+                    GoogleBuilder().build()
+                )
+
+                // Create and launch sign-in intent
+                startActivityForResult(
+                    AuthUI.getInstance()
+                        .createSignInIntentBuilder()
+                        .setIsSmartLockEnabled(false)
+                        .setAvailableProviders(providers)
+                        .build(),
+                    RC_SIGN_IN
+                )
             }
-
-            override fun onChildChanged(dataSnapshot: DataSnapshot, s: String?) {}
-            override fun onChildRemoved(dataSnapshot: DataSnapshot) {}
-            override fun onChildMoved(dataSnapshot: DataSnapshot, s: String?) {}
-            override fun onCancelled(databaseError: DatabaseError) {}
         }
-        mMessagesDatabaseReference.addChildEventListener(mChildEventListener)
 
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == RC_SIGN_IN) {
+            if (resultCode == RESULT_OK) {
+                // Sign-in succeeded, set up the UI
+                Toast.makeText(this, "Signed in!", Toast.LENGTH_SHORT).show()
+            } else if (resultCode == RESULT_CANCELED) {
+                // Sign in was canceled by the user, finish the activity
+                Toast.makeText(this, "Sign in canceled", Toast.LENGTH_SHORT).show()
+                finish()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mFirebaseAuth.addAuthStateListener(mAuthStateListener)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (mAuthStateListener != null) {
+            mFirebaseAuth.removeAuthStateListener(mAuthStateListener)
+        }
+        mMessageAdapter?.clear();
+        detachDatabaseReadListener();
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -109,6 +161,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return super.onOptionsItemSelected(item)
+        return when (item.itemId) {
+            R.id.sign_out_menu -> {
+                AuthUI.getInstance().signOut(this)
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun onSignedInInitialize(username: String) {
+        mUsername = username
+        attachDatabaseReadListener()
+    }
+
+    private fun onSignedOutCleanup() {
+        mUsername = ANONYMOUS
+        mMessageAdapter!!.clear()
+        detachDatabaseReadListener()
+    }
+
+    private fun attachDatabaseReadListener() {
+        if (mChildEventListener == null) {
+            mChildEventListener = object : ChildEventListener {
+                override fun onChildAdded(dataSnapshot: DataSnapshot, s: String?) {
+                    val friendlyMessage = dataSnapshot.getValue(
+                        FriendlyMessage::class.java
+                    )
+                    mMessageAdapter!!.add(friendlyMessage)
+                }
+
+                override fun onChildChanged(dataSnapshot: DataSnapshot, s: String?) {}
+                override fun onChildRemoved(dataSnapshot: DataSnapshot) {}
+                override fun onChildMoved(dataSnapshot: DataSnapshot, s: String?) {}
+                override fun onCancelled(databaseError: DatabaseError) {}
+            }
+            mMessagesDatabaseReference.addChildEventListener(mChildEventListener!!)
+        }
+    }
+
+    private fun detachDatabaseReadListener() {
+        if (mChildEventListener != null) {
+            mMessagesDatabaseReference.removeEventListener(mChildEventListener!!)
+            mChildEventListener = null
+        }
     }
 }
